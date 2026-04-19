@@ -74,6 +74,11 @@
 - Remove Python 3.9 support. Python 3.10 or newer is now required.
 - Remove integer type support from `wp.isfinite()`, `wp.isnan()`, and `wp.isinf()`
   ([GH-847](https://github.com/NVIDIA/warp/issues/847)).
+- Remove the private-API forwarding layer deprecated in the 1.11 transition
+  ([GH-1352](https://github.com/NVIDIA/warp/issues/1352)). The 14 shim module
+  paths (`warp.torch`, `warp.context`, etc.), `warp.mat`/`warp.vec`,
+  `warp.context.Devicelike`, and the `Module.foo` → `Module._foo` proxy are gone.
+  Use the curated public API in the `warp` namespace instead.
 
 ### Deprecated
 

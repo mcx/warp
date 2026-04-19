@@ -2611,11 +2611,6 @@ class Module:
 
         return options
 
-    def __getattr__(self, name):
-        from warp._src.utils import get_deprecated_method  # noqa: PLC0415
-
-        return get_deprecated_method(self, "warp.Module", name)
-
     @synchronized
     def increment_id(self) -> int:
         self.cpu_exec_id += 1
@@ -8522,8 +8517,9 @@ def load_module(
             or Warp :class:`Module`. If ``None``, loads the module that called this function.
         device: The device or list of devices to load the module on. If ``None``, load on all devices.
         recursive: Whether to load submodules. For example, if the given module is
-            ``warp.render``, this will also load ``warp.render.utils`` and
-            ``warp.render.opengl``.
+            ``warp.optim``, this also loads every registered ``warp.optim.*``
+            submodule containing ``@wp.kernel``, ``@wp.func``, or ``@wp.struct``
+            definitions.
         block_dim: The number of threads per block (always 1 for ``"cpu"`` devices).
         max_workers: The maximum number of parallel threads to use for loading modules. ``0`` means serial loading.
             If ``None``, ```warp.config.load_module_max_workers`` determines the default.
