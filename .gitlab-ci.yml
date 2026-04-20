@@ -668,6 +668,14 @@ linux-x86_64 asv build:
   script:
     - uvx asv machine --machine asv-build --yes
     - rc=0; uvx asv continuous --quick -b PythonBuiltins $COMPARE_REF $CI_COMMIT_SHA || rc=$?; if [ $rc -gt 1 ]; then exit $rc; fi
+    # Strict gate: discovery or import errors in the benchmark suite must fail
+    # the pipeline. The `asv continuous` call above returns 1 for both true
+    # regressions and hard errors, so a standalone `asv check` is needed.
+    # asv check resolves `main^{commit}` from asv.conf.json's `branches`, but
+    # the CI checkout leaves us on a detached HEAD with no local `main`, so
+    # pin one at the current commit first.
+    - git branch -f main $CI_COMMIT_SHA
+    - uvx asv check --verbose
   artifacts:
     paths:
       - asv/env/
