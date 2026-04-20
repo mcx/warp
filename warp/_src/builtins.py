@@ -5312,8 +5312,9 @@ add_builtin(
 
 
 def tile_dot_value_func(arg_types, arg_values):
+    # return generic type (for doc builds)
     if arg_types is None:
-        return Any
+        return tile(dtype=Any, shape=(1,))
 
     a = arg_types["a"]
     b = arg_types["b"]
@@ -5327,7 +5328,7 @@ def tile_dot_value_func(arg_types, arg_values):
     if not types_equal(a.dtype, b.dtype):
         raise TypeError(f"tile_dot() arguments must have the same dtype, got {a.dtype} and {b.dtype}")
 
-    return type_scalar_type(a.dtype)
+    return tile(dtype=type_scalar_type(a.dtype), shape=(1,))
 
 
 add_builtin(
@@ -5336,13 +5337,12 @@ add_builtin(
     value_func=tile_dot_value_func,
     doc="""Compute the dot product of two tiles.
 
-    Computes a full contraction (tensordot) between corresponding elements,
-    sums the results, and broadcasts the scalar to all threads. For scalar
-    tiles this is the standard dot product; for vector or matrix tiles each
-    element pair is fully contracted (e.g., ``wp.dot(a[i], b[i])`` for
-    ``vec3`` elements), so the result is always a single scalar value.
+    Computes a full contraction (tensordot) between corresponding elements
+    and sums the results. For scalar tiles this is the standard dot product;
+    for vector or matrix tiles each element pair is fully contracted
+    (e.g., ``wp.dot(a[i], b[i])`` for ``vec3`` elements).
 
-    Equivalent to ``wp.tile_extract(wp.tile_sum(wp.tile_map(wp.tensordot, a, b)), 0)``
+    Equivalent to ``wp.tile_sum(wp.tile_map(wp.tensordot, a, b))``
     but without any intermediate tiles or shared-memory round trips.
 
     Args:
@@ -5350,9 +5350,8 @@ add_builtin(
         b: Second tile operand (must have same shape and dtype as ``a``).
 
     Returns:
-        The scalar result of the full contraction, i.e. the sum of
-        ``wp.tensordot(a[i], b[i])`` over all elements. The return type
-        is the tile's scalar type (e.g., ``float`` for tiles of ``vec3f``).
+        A single-element tile holding the dot-product result. Index the
+        tile at ``[0]`` to obtain the scalar value.
 
     Example:
 
@@ -5371,7 +5370,7 @@ add_builtin(
 
         .. code-block:: text
 
-            128.0""",
+            [128] = tile(shape=(1), storage=register)""",
     group="Tile Primitives",
     export=False,
 )

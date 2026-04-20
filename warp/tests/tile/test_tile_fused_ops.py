@@ -226,7 +226,7 @@ def test_tile_axpy_grad(test, device):
 
 
 def test_tile_dot_basic(test, device):
-    """Basic dot product of two tiles returns correct scalar."""
+    """Basic dot product of two tiles returns correct single-element tile."""
     N = 64
 
     @wp.kernel(enable_backward=False, module="unique")
@@ -239,8 +239,7 @@ def test_tile_dot_basic(test, device):
         a = wp.tile_load(a_in, shape=N, offset=0, storage="register")
         b = wp.tile_load(b_in, shape=N, offset=0, storage="shared")
         result = wp.tile_dot(a, b)
-        if i == 0:
-            out[0] = result
+        wp.tile_store(out, result)
 
     a_np = np.ones(N, dtype=np.float32) * 2.0
     b_np = np.ones(N, dtype=np.float32) * 3.0
@@ -269,8 +268,7 @@ def test_tile_dot_nonuniform(test, device):
         a = wp.tile_load(a_in, shape=N, offset=0, storage="register")
         b = wp.tile_load(b_in, shape=N, offset=0, storage="register")
         result = wp.tile_dot(a, b)
-        if i == 0:
-            out[0] = result
+        wp.tile_store(out, result)
 
     a_np = np.arange(N, dtype=np.float32)
     b_np = np.arange(N, dtype=np.float32) * 0.5
@@ -298,8 +296,7 @@ def test_tile_dot_2d(test, device):
         a = wp.tile_load(a_in, shape=(TILE_M, TILE_N), offset=(0, 0), storage="register")
         b = wp.tile_load(b_in, shape=(TILE_M, TILE_N), offset=(0, 0), storage="shared")
         result = wp.tile_dot(a, b)
-        if i == 0:
-            out[0] = result
+        wp.tile_store(out, result)
 
     a_np = np.ones((TILE_M, TILE_N), dtype=np.float32) * 2.0
     b_np = np.ones((TILE_M, TILE_N), dtype=np.float32) * 3.0
@@ -328,8 +325,7 @@ def test_tile_dot_shared_shared(test, device):
         a = wp.tile_load(a_in, shape=N, offset=0, storage="shared")
         b = wp.tile_load(b_in, shape=N, offset=0, storage="shared")
         result = wp.tile_dot(a, b)
-        if i == 0:
-            out[0] = result
+        wp.tile_store(out, result)
 
     a_np = np.arange(N, dtype=np.float32) - 32.0  # mixed positive/negative
     b_np = np.ones(N, dtype=np.float32) * 2.0
@@ -361,8 +357,7 @@ def test_tile_dot_grad_shared(test, device):
         a = wp.tile_load(a_in, shape=N, offset=0, storage="shared")
         b = wp.tile_load(b_in, shape=N, offset=0, storage="shared")
         result = wp.tile_dot(a, b)
-        if i == 0:
-            out[0] = result
+        wp.tile_store(out, result)
 
     a_np = np.arange(1, N + 1, dtype=np.float32)
     b_np = np.arange(N, 0, -1, dtype=np.float32)
@@ -398,8 +393,7 @@ def test_tile_dot_grad(test, device):
         a = wp.tile_load(a_in, shape=N, offset=0, storage="register")
         b = wp.tile_load(b_in, shape=N, offset=0, storage="register")
         result = wp.tile_dot(a, b)
-        if i == 0:
-            out[0] = result
+        wp.tile_store(out, result)
 
     a_np = np.arange(1, N + 1, dtype=np.float32)
     b_np = np.arange(N, 0, -1, dtype=np.float32)
@@ -423,8 +417,90 @@ def test_tile_dot_grad(test, device):
     assert_np_equal(b_in.grad.numpy(), a_np, tol=1e-4)
 
 
+def test_tile_dot_grad_extract(test, device):
+    """Gradient propagates correctly when tile_extract is used on tile_dot result.
+
+    Uses tile_extract to obtain the scalar, then a single-thread write.
+    This exercises the adjoint broadcast path: adj_tile_extract writes the
+    gradient into the 1-element tile on one thread, and adj_tile_dot must
+    broadcast it to all threads before computing per-element gradients.
+    """
+    N = 16
+
+    @wp.kernel(module="unique")
+    def compute(
+        a_in: wp.array[float],
+        b_in: wp.array[float],
+        out: wp.array[float],
+    ):
+        i, j = wp.tid()
+        a = wp.tile_load(a_in, shape=N, offset=0, storage="register")
+        b = wp.tile_load(b_in, shape=N, offset=0, storage="register")
+        result = wp.tile_dot(a, b)
+        val = wp.tile_extract(result, 0)
+        if j == 0:
+            out[i] = val
+
+    a_np = np.arange(1, N + 1, dtype=np.float32)
+    b_np = np.arange(N, 0, -1, dtype=np.float32)
+
+    a_in = wp.array(a_np, requires_grad=True, device=device)
+    b_in = wp.array(b_np, requires_grad=True, device=device)
+    out = wp.zeros(1, dtype=float, requires_grad=True, device=device)
+
+    with wp.Tape() as tape:
+        wp.launch_tiled(compute, dim=[1], inputs=[a_in, b_in, out], block_dim=BLOCK_DIM, device=device)
+
+    out.grad = wp.ones_like(out, device=device)
+    tape.backward()
+
+    expected_fwd = np.dot(a_np, b_np)
+    test.assertAlmostEqual(out.numpy()[0], expected_fwd, places=4)
+
+    assert_np_equal(a_in.grad.numpy(), b_np, tol=1e-4)
+    assert_np_equal(b_in.grad.numpy(), a_np, tol=1e-4)
+
+
+def test_tile_dot_grad_extract_shared(test, device):
+    """Same as test_tile_dot_grad_extract but with shared-storage operands."""
+    N = 16
+
+    @wp.kernel(module="unique")
+    def compute(
+        a_in: wp.array[float],
+        b_in: wp.array[float],
+        out: wp.array[float],
+    ):
+        i, j = wp.tid()
+        a = wp.tile_load(a_in, shape=N, offset=0, storage="shared")
+        b = wp.tile_load(b_in, shape=N, offset=0, storage="shared")
+        result = wp.tile_dot(a, b)
+        val = wp.tile_extract(result, 0)
+        if j == 0:
+            out[i] = val
+
+    a_np = np.arange(1, N + 1, dtype=np.float32)
+    b_np = np.arange(N, 0, -1, dtype=np.float32)
+
+    a_in = wp.array(a_np, requires_grad=True, device=device)
+    b_in = wp.array(b_np, requires_grad=True, device=device)
+    out = wp.zeros(1, dtype=float, requires_grad=True, device=device)
+
+    with wp.Tape() as tape:
+        wp.launch_tiled(compute, dim=[1], inputs=[a_in, b_in, out], block_dim=BLOCK_DIM, device=device)
+
+    out.grad = wp.ones_like(out, device=device)
+    tape.backward()
+
+    expected_fwd = np.dot(a_np, b_np)
+    test.assertAlmostEqual(out.numpy()[0], expected_fwd, places=4)
+
+    assert_np_equal(a_in.grad.numpy(), b_np, tol=1e-4)
+    assert_np_equal(b_in.grad.numpy(), a_np, tol=1e-4)
+
+
 def test_tile_dot_vec3(test, device):
-    """tile_dot on vec3 tiles returns a scalar (full contraction via tensordot)."""
+    """tile_dot on vec3 tiles returns a single-element tile (full contraction via tensordot)."""
     N = 16
 
     @wp.kernel(enable_backward=False, module="unique")
@@ -437,8 +513,7 @@ def test_tile_dot_vec3(test, device):
         a = wp.tile_load(a_in, shape=N, offset=0, storage="register")
         b = wp.tile_load(b_in, shape=N, offset=0, storage="shared")
         result = wp.tile_dot(a, b)
-        if i == 0:
-            out[0] = result
+        wp.tile_store(out, result)
 
     a_np = np.arange(N * 3, dtype=np.float32).reshape(N, 3)
     b_np = np.ones((N, 3), dtype=np.float32) * 2.0
@@ -455,7 +530,7 @@ def test_tile_dot_vec3(test, device):
 
 
 def test_tile_dot_mat33(test, device):
-    """tile_dot on mat33 tiles returns a scalar (full contraction via tensordot)."""
+    """tile_dot on mat33 tiles returns a single-element tile (full contraction via tensordot)."""
     N = 8
 
     @wp.kernel(enable_backward=False, module="unique")
@@ -468,8 +543,7 @@ def test_tile_dot_mat33(test, device):
         a = wp.tile_load(a_in, shape=N, offset=0, storage="register")
         b = wp.tile_load(b_in, shape=N, offset=0, storage="shared")
         result = wp.tile_dot(a, b)
-        if i == 0:
-            out[0] = result
+        wp.tile_store(out, result)
 
     a_np = np.arange(N * 9, dtype=np.float32).reshape(N, 3, 3)
     b_np = np.ones((N, 3, 3), dtype=np.float32) * 0.5
@@ -573,6 +647,10 @@ add_function_test(TestTileFusedOps, "test_tile_dot_shared_shared", test_tile_dot
 add_function_test(TestTileFusedOps, "test_tile_dot_2d", test_tile_dot_2d, devices=devices)
 add_function_test(TestTileFusedOps, "test_tile_dot_grad", test_tile_dot_grad, devices=devices)
 add_function_test(TestTileFusedOps, "test_tile_dot_grad_shared", test_tile_dot_grad_shared, devices=devices)
+add_function_test(TestTileFusedOps, "test_tile_dot_grad_extract", test_tile_dot_grad_extract, devices=devices)
+add_function_test(
+    TestTileFusedOps, "test_tile_dot_grad_extract_shared", test_tile_dot_grad_extract_shared, devices=devices
+)
 add_function_test(TestTileFusedOps, "test_tile_dot_vec3", test_tile_dot_vec3, devices=devices)
 add_function_test(TestTileFusedOps, "test_tile_dot_mat33", test_tile_dot_mat33, devices=devices)
 add_function_test(TestTileFusedOps, "test_tile_axpy_vec3", test_tile_axpy_vec3, devices=devices)

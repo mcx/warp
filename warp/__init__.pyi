@@ -3590,16 +3590,15 @@ def tile_sum(a: Tile[Any, tuple[int, ...]]) -> Tile[Any, tuple[Literal[1]]]:
             [256] = tile(shape=(1), storage=register)"""
     ...
 
-def tile_dot(a: Tile[Any, tuple[int, ...]], b: Tile[Any, tuple[int, ...]]) -> Any:
+def tile_dot(a: Tile[Any, tuple[int, ...]], b: Tile[Any, tuple[int, ...]]) -> Tile[Any, tuple[Literal[1]]]:
     """Compute the dot product of two tiles.
 
-    Computes a full contraction (tensordot) between corresponding elements,
-    sums the results, and broadcasts the scalar to all threads. For scalar
-    tiles this is the standard dot product; for vector or matrix tiles each
-    element pair is fully contracted (e.g., ``wp.dot(a[i], b[i])`` for
-    ``vec3`` elements), so the result is always a single scalar value.
+    Computes a full contraction (tensordot) between corresponding elements
+    and sums the results. For scalar tiles this is the standard dot product;
+    for vector or matrix tiles each element pair is fully contracted
+    (e.g., ``wp.dot(a[i], b[i])`` for ``vec3`` elements).
 
-    Equivalent to ``wp.tile_extract(wp.tile_sum(wp.tile_map(wp.tensordot, a, b)), 0)``
+    Equivalent to ``wp.tile_sum(wp.tile_map(wp.tensordot, a, b))``
     but without any intermediate tiles or shared-memory round trips.
 
     Args:
@@ -3607,9 +3606,8 @@ def tile_dot(a: Tile[Any, tuple[int, ...]], b: Tile[Any, tuple[int, ...]]) -> An
         b: Second tile operand (must have same shape and dtype as ``a``).
 
     Returns:
-        The scalar result of the full contraction, i.e. the sum of
-        ``wp.tensordot(a[i], b[i])`` over all elements. The return type
-        is the tile's scalar type (e.g., ``float`` for tiles of ``vec3f``).
+        A single-element tile holding the dot-product result. Index the
+        tile at ``[0]`` to obtain the scalar value.
 
     Example:
 
@@ -3628,7 +3626,7 @@ def tile_dot(a: Tile[Any, tuple[int, ...]], b: Tile[Any, tuple[int, ...]]) -> An
 
         .. code-block:: text
 
-            128.0"""
+            [128] = tile(shape=(1), storage=register)"""
     ...
 
 def tile_axpy(alpha: Any, src: Tile[Any, tuple[int, ...]], dest: Tile[Any, tuple[int, ...]]) -> None:
