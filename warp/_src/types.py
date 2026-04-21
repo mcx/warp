@@ -5426,7 +5426,7 @@ class Bvh:
 
         if self.device.is_cpu:
             if constructor == BvhConstructor.LBVH:
-                warp.utils.warn(
+                warp._src.utils.warn(
                     "LBVH constructor is not available for a CPU tree. Falling back to SAH constructor.", stacklevel=2
                 )
                 constructor = BvhConstructor.SAH
@@ -5520,14 +5520,14 @@ class Bvh:
 
         if self.device.is_cpu:
             if constructor == BvhConstructor.LBVH:
-                warp.utils.warn(
+                warp._src.utils.warn(
                     "LBVH constructor is not available for a CPU tree. Falling back to SAH constructor.", stacklevel=2
                 )
                 constructor = BvhConstructor.SAH
             self.runtime.core.wp_bvh_rebuild_host(self.id, constructor)
         else:
             if constructor != BvhConstructor.LBVH:
-                warp.utils.warn(
+                warp._src.utils.warn(
                     "In-place rebuild method on the CUDA device only supports LBVH constructor. Falling back to LBVH constructor.",
                     stacklevel=2,
                 )

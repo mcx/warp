@@ -4015,7 +4015,7 @@ class Device:
 
                 return psutil.virtual_memory().total
             except ModuleNotFoundError:
-                warp.utils.warn(
+                warp._src.utils.warn(
                     "Please install the 'psutil' package to query CPU memory information.",
                     UserWarning,
                     stacklevel=2,
@@ -4040,7 +4040,7 @@ class Device:
 
                 return psutil.virtual_memory().free
             except ModuleNotFoundError:
-                warp.utils.warn(
+                warp._src.utils.warn(
                     "Please install the 'psutil' package to query CPU memory information.",
                     UserWarning,
                     stacklevel=2,
