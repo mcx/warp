@@ -1620,20 +1620,24 @@ class ScopedPeerAccess:
 
 
 class ScopedCapture:
-    """Context manager to capture a sequence of operations into a CUDA graph.
+    """Context manager to capture a sequence of operations into a graph.
 
-    CUDA graphs allow a sequence of GPU operations to be captured and replayed
-    with reduced launch overhead. The captured graph is available as the ``graph``
-    attribute after exiting the context.
+    Captures kernel launches, memory copies, and memsets for later replay
+    with reduced launch overhead. Works on both CPU and CUDA devices. The
+    captured graph is available as the ``graph`` attribute after exiting
+    the context.
 
     Args:
-        device: Device on which to capture operations.
-        stream: Stream on which to capture operations.
+        device: Device on which to capture operations (CPU or CUDA).
+        stream: Stream on which to capture operations (CUDA only).
         force_module_load: If ``True``, force all modules to load before capture begins.
         external: If ``True``, indicates an external graph capture is already active.
+        apic: If ``True``, enable APIC recording for serialization via
+            :func:`capture_save`. On CPU, recording always occurs regardless
+            of this flag (needed for CPU graph replay). Default is ``False``.
 
     Attributes:
-        graph: The captured CUDA graph, available after context exit.
+        graph: The captured graph, available after context exit.
         active: Whether capture is currently in progress.
 
     Example:
@@ -1649,18 +1653,25 @@ class ScopedCapture:
         :func:`capture_begin`, :func:`capture_end`, :func:`capture_launch`
     """
 
-    def __init__(self, device: DeviceLike = None, stream=None, force_module_load=None, external=False):
+    def __init__(
+        self, device: DeviceLike = None, stream=None, force_module_load=None, external=False, apic: bool = False
+    ):
         self.device = device
         self.stream = stream
         self.force_module_load = force_module_load
         self.external = external
+        self.apic = apic
         self.active = False
         self.graph = None
 
     def __enter__(self):
         try:
             wp.capture_begin(
-                device=self.device, stream=self.stream, force_module_load=self.force_module_load, external=self.external
+                device=self.device,
+                stream=self.stream,
+                force_module_load=self.force_module_load,
+                external=self.external,
+                apic=self.apic,
             )
             self.active = True
             return self

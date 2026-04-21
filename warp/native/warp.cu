@@ -4,6 +4,7 @@
 #include "warp.h"
 
 #include "alloc_tracker.h"
+#include "apic.h"
 #include "cuda_util.h"
 #include "error.h"
 #include "scan.h"
@@ -929,6 +930,26 @@ bool wp_memcpy_d2d(void* context, void* dest, void* src, size_t n, void* stream)
 
     end_cuda_range(WP_TIMING_MEMCPY, cuda_stream);
 
+    // APIC recording.
+    // TODO: When execution becomes fully deferred (like the CPU path), move
+    // CUDA-result checking to replay time (capture_launch / load+launch) and
+    // make recording unconditional at capture time. For now we still execute
+    // the CUDA op live under stream capture, but the record itself is API-
+    // intent only and doesn't depend on the live call's result.
+    APICState apic_state = wp_apic_get_recording_state();
+    if (apic_state) {
+        int32_t dst_region, src_region;
+        uint64_t dst_offset, src_offset;
+        bool dst_ok = apic_resolve_ptr(apic_state, (uint64_t)dest, &dst_region, &dst_offset);
+        bool src_ok = apic_resolve_ptr(apic_state, (uint64_t)src, &src_region, &src_offset);
+        if (!dst_ok)
+            fprintf(stderr, "APIC: Error - memcpy dst pointer not in any registered region\n");
+        if (!src_ok)
+            fprintf(stderr, "APIC: Error - memcpy src pointer not in any registered region\n");
+        if (dst_ok && src_ok)
+            apic_record_memcpy_d2d(apic_state, dst_region, dst_offset, src_region, src_offset, n);
+    }
+
     return result;
 }
 
@@ -1077,25 +1098,38 @@ __global__ void memset_kernel(int* dest, int value, size_t n)
     }
 }
 
-void wp_memset_device(void* context, void* dest, int value, size_t n)
+bool wp_memset_device(void* context, void* dest, int value, size_t n, void* stream)
 {
     ContextGuard guard(context);
 
-    if (true)  // ((n%4) > 0)
-    {
-        cudaStream_t stream = get_current_stream();
+    cudaStream_t cuda_stream;
+    if (stream != WP_CURRENT_STREAM)
+        cuda_stream = static_cast<CUstream>(stream);
+    else
+        cuda_stream = get_current_stream();
 
-        begin_cuda_range(WP_TIMING_MEMSET, stream, context, "memset");
+    begin_cuda_range(WP_TIMING_MEMSET, cuda_stream, context, "memset");
 
-        // for unaligned lengths fallback to CUDA memset
-        check_cuda(cudaMemsetAsync(dest, value, n, stream));
+    bool result = check_cuda(cudaMemsetAsync(dest, value, n, cuda_stream));
 
-        end_cuda_range(WP_TIMING_MEMSET, stream);
-    } else {
-        // custom kernel to support 4-byte values (and slightly lower host overhead)
-        const size_t num_words = n / 4;
-        wp_launch_device(WP_CURRENT_CONTEXT, memset_kernel, num_words, ((int*)dest, value, num_words));
+    end_cuda_range(WP_TIMING_MEMSET, cuda_stream);
+
+    // APIC recording.
+    // TODO: When execution becomes fully deferred (like the CPU path), move
+    // CUDA-result checking to replay time (capture_launch / load+launch) and
+    // make recording unconditional at capture time. For now we still execute
+    // the CUDA op live under stream capture, but the record itself is API-
+    // intent only and doesn't depend on the live call's result.
+    APICState apic_state = wp_apic_get_recording_state();
+    if (apic_state) {
+        int32_t region_id;
+        uint64_t offset;
+        if (apic_resolve_ptr(apic_state, (uint64_t)dest, &region_id, &offset))
+            apic_record_memset(apic_state, region_id, offset, n, value);
+        else
+            fprintf(stderr, "APIC: Error - memset dst pointer not in any registered region\n");
     }
+    return result;
 }
 
 // fill memory buffer with a value: generic memtile kernel using memcpy for each element
@@ -4543,7 +4577,8 @@ size_t wp_cuda_launch_kernel(
     int block_dim,
     int shared_memory_bytes,
     void** args,
-    void* stream
+    void* stream,
+    const APICLaunchInfo* apic_info
 )
 {
     ContextGuard guard(context);
@@ -4588,6 +4623,39 @@ size_t wp_cuda_launch_kernel(
     check_cu(res);
 
     end_cuda_range(WP_TIMING_KERNEL, stream);
+
+    // APIC recording: record kernel launch to byte stream if capturing
+    if (apic_info) {
+        APICState state = wp_apic_get_recording_state();
+        if (state) {
+            // Use kernel_dim from APICLaunchInfo (set by Python from kernel.adj.kernel_dim)
+            int ndim = apic_info->kernel_dim;
+            if (ndim < 1)
+                ndim = 1;
+            if (ndim > APIC_LAUNCH_MAX_DIMS)
+                ndim = APIC_LAUNCH_MAX_DIMS;
+
+            // Read multi-dimensional shape from launch_bounds_t in args[0].
+            // launch_bounds_t<N> starts with int shape[N], matching the CPU path.
+            int shape[APIC_LAUNCH_MAX_DIMS] = {};
+            uint64_t launch_size = dim;
+            if (args && args[0] && ndim > 0) {
+                const int* bounds_shape = static_cast<const int*>(args[0]);
+                for (int d = 0; d < ndim; d++)
+                    shape[d] = bounds_shape[d];
+                launch_size = 1;
+                for (int d = 0; d < ndim; d++)
+                    launch_size *= shape[d];
+            } else {
+                shape[0] = (int)dim;
+            }
+
+            apic_record_kernel_launch(
+                state, apic_info->kernel_key, apic_info->module_hash, apic_info->is_forward, shape, ndim, launch_size,
+                max_blocks, block_dim, shared_memory_bytes, apic_info->params, apic_info->num_params
+            );
+        }
+    }
 
     return res;
 }
@@ -4729,3 +4797,6 @@ void wp_cuda_timing_end(timing_result_t* results, int size)
 
 // #include "spline.inl"
 // #include "volume.inl"
+
+// APIC (API Capture) implementation
+#include "apic.cu"

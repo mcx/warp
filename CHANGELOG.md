@@ -68,6 +68,11 @@
   ([GH-1287](https://github.com/NVIDIA/warp/issues/1287)).
 - Add `wp.bfloat16` scalar data type with array allocation, kernel execution, autodiff, DLPack, PyTorch, JAX, and
   optional `ml_dtypes` NumPy interop ([GH-1332](https://github.com/NVIDIA/warp/issues/1332)).
+- Add preliminary graph capture support for serialization (APIC) and CPU replay. Operations recorded during
+  `capture_begin()`/`capture_end()` can be serialized to `.wrp` files via `capture_save()`
+  and loaded for execution from Python or standalone C++ via `capture_load()`. CPU graph
+  capture supports replay through `capture_launch()`. Added `wp.handle` scalar type for mesh handle serialization
+  ([GH-1349](https://github.com/NVIDIA/warp/issues/1349)).
 
 ### Removed
 

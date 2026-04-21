@@ -4383,7 +4383,7 @@ extern "C" {{
 
 // Python CPU entry points
 WP_API void {name}_cpu_forward(
-    wp::launch_bounds_t<{launch_ndim}> dim,
+    wp::launch_bounds_t<{launch_ndim}> *dim,
     wp_args_{name} *_wp_args)
 {{
     wp::tile_shared_storage_t tile_mem;
@@ -4391,9 +4391,9 @@ WP_API void {name}_cpu_forward(
     wp::shared_tile_storage = &tile_mem;
 #endif
 
-    for (size_t task_index = 0; task_index < dim.size; ++task_index)
+    for (size_t task_index = 0; task_index < dim->size; ++task_index)
     {{
-        {name}_cpu_kernel_forward(dim, task_index, _wp_args);
+        {name}_cpu_kernel_forward(*dim, task_index, _wp_args);
     }}
 }}
 
@@ -4406,7 +4406,7 @@ cpu_module_template_backward = """
 extern "C" {{
 
 WP_API void {name}_cpu_backward(
-    wp::launch_bounds_t<{launch_ndim}> dim,
+    wp::launch_bounds_t<{launch_ndim}> *dim,
     wp_args_{name} *_wp_args,
     wp_args_{name} *_wp_adj_args)
 {{
@@ -4415,9 +4415,9 @@ WP_API void {name}_cpu_backward(
     wp::shared_tile_storage = &tile_mem;
 #endif
 
-    for (size_t task_index = 0; task_index < dim.size; ++task_index)
+    for (size_t task_index = 0; task_index < dim->size; ++task_index)
     {{
-        {name}_cpu_kernel_backward(dim, task_index, _wp_args, _wp_adj_args);
+        {name}_cpu_kernel_backward(*dim, task_index, _wp_args, _wp_adj_args);
     }}
 }}
 

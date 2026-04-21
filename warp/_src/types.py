@@ -362,6 +362,16 @@ class uint64(int_base):
     _type_ = ctypes.c_uint64
 
 
+class handle(uint64):
+    """Type for object handles (Mesh, Volume, BVH) in kernel parameters.
+
+    Behaves identically to ``uint64`` but allows APIC to detect which
+    parameters need pointer remapping during graph replay.
+    """
+
+    _wp_native_name_ = "uint64"
+
+
 # Scalar type tuples - defined here as canonical source, used by TypeVars below
 int_types = (int8, uint8, int16, uint16, int32, uint32, int64, uint64)
 float_types = (float16, bfloat16, float32, float64)
@@ -2507,6 +2517,8 @@ def type_typestr(dtype: type) -> str:
         return "<i8"
     elif dtype is uint64:
         return "<u8"
+    elif dtype is handle:
+        return "<u8"
     elif isinstance(dtype, warp._src.codegen.Struct):
         return f"|V{ctypes.sizeof(dtype.ctype)}"
     elif hasattr(dtype, "_wp_ctype_"):
@@ -2794,6 +2806,10 @@ def scalars_equal_generic(a, b, match_generic=True):
             return True
         if a is Float and b is Float:
             return True
+
+    # handle and uint64 are interchangeable (handle is a semantic alias for uint64)
+    if (a is handle and b is uint64) or (a is uint64 and b is handle):
+        return True
 
     return a is b
 
@@ -3982,8 +3998,15 @@ class array(Array[DType, NDim]):
                     f"Warning: Array {self} is being written to but has already been read from in a previous launch. This may corrupt gradient computation in the backward pass."
                 )
 
+    def _apic_ensure_tracked(self):
+        """Register this array as a memory region if an APIC capture is active."""
+        apic_capture = getattr(warp._src.context.runtime, "_apic_capture", None)
+        if apic_capture is not None and self.ptr:
+            apic_capture.track_array(self)
+
     def zero_(self):
         """Zero out the array entries."""
+        self._apic_ensure_tracked()
         if self.is_contiguous:
             # simple memset is usually faster than generic fill
             self.device.memset(self.ptr, 0, self.size * type_size_in_bytes(self.dtype))
@@ -4020,6 +4043,8 @@ class array(Array[DType, NDim]):
         """
         if self.size == 0:
             return
+
+        self._apic_ensure_tracked()
 
         # try to convert the given value to the array dtype
         try:
@@ -7100,6 +7125,7 @@ simple_type_codes = {
     uint16: "u2",
     uint32: "u4",
     uint64: "u8",
+    handle: "u8",
     float16: "f2",
     bfloat16: "bf2",
     float32: "f4",

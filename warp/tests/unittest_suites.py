@@ -125,6 +125,8 @@ def default_suite(test_loader: unittest.TestLoader = unittest.defaultTestLoader)
     from warp.tests.test_adam import TestAdam
     from warp.tests.test_allocation_tracker import TestAllocTracker
     from warp.tests.test_allocator import TestAllocatorProtocol, TestCustomAllocator, TestRmmAllocator
+    from warp.tests.test_apic import TestApic
+    from warp.tests.test_apic_mesh import TestApicMesh
     from warp.tests.test_arithmetic import TestArithmetic
     from warp.tests.test_array import TestArray
     from warp.tests.test_array_reduce import TestArrayReduce
@@ -164,6 +166,7 @@ def default_suite(test_loader: unittest.TestLoader = unittest.defaultTestLoader)
     from warp.tests.test_grad import TestGrad
     from warp.tests.test_grad_customs import TestGradCustoms
     from warp.tests.test_grad_debug import TestGradDebug
+    from warp.tests.test_graph import TestGraph
     from warp.tests.test_import import TestImport
     from warp.tests.test_indexedarray import TestIndexedArray
     from warp.tests.test_intersect import TestIntersect
@@ -232,6 +235,8 @@ def default_suite(test_loader: unittest.TestLoader = unittest.defaultTestLoader)
         TestAdam,
         TestAllocTracker,
         TestAllocatorProtocol,
+        TestApic,
+        TestApicMesh,
         TestArithmetic,
         TestArray,
         TestArrayReduce,
@@ -286,6 +291,7 @@ def default_suite(test_loader: unittest.TestLoader = unittest.defaultTestLoader)
         TestGrad,
         TestGradCustoms,
         TestGradDebug,
+        TestGraph,
         TestHashGrid,
         TestImport,
         TestIndexedArray,

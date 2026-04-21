@@ -440,6 +440,7 @@ class FfiKernel:
                     hooks.forward_smem_bytes,
                     kernel_params,
                     stream,
+                    None,  # apic_info
                 )
 
         except Exception as e:

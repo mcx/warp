@@ -6,6 +6,8 @@
 // defines all crt + builtin types
 #include "builtin.h"
 
+#include "apic_types.h"
+
 #include <cstdint>
 
 #define WP_CURRENT_STREAM ((void*)0xffffffffffffffff)
@@ -63,8 +65,8 @@ wp_memcpy_p2p(void* dst_context, void* dst, void* src_context, void* src, size_t
 WP_API bool
 wp_memcpy_batch(void* context, void** dsts, void** srcs, size_t* sizes, size_t count, void* stream = WP_CURRENT_STREAM);
 
-WP_API void wp_memset_host(void* dest, int value, size_t n);
-WP_API void wp_memset_device(void* context, void* dest, int value, size_t n);
+WP_API bool wp_memset_host(void* dest, int value, size_t n);
+WP_API bool wp_memset_device(void* context, void* dest, int value, size_t n, void* stream = WP_CURRENT_STREAM);
 
 // takes srcsize bytes starting at src and repeats them n times at dst (writes srcsize * n bytes in total):
 WP_API void wp_memtile_host(void* dest, const void* src, size_t srcsize, size_t n);
@@ -580,6 +582,9 @@ WP_API bool wp_cuda_compile_solver(
     int num_threads
 );
 
+// CPU kernel launch with optional APIC recording
+WP_API void wp_cpu_launch_kernel(void* func, void* bounds, void* args, void* adj_args, const APICLaunchInfo* apic_info);
+
 WP_API void* wp_cuda_load_module(void* context, const char* ptx);
 WP_API void wp_cuda_unload_module(void* context, void* module);
 WP_API void* wp_cuda_get_kernel(void* context, void* module, const char* name);
@@ -591,7 +596,8 @@ WP_API size_t wp_cuda_launch_kernel(
     int block_dim,
     int shared_memory_bytes,
     void** args,
-    void* stream
+    void* stream,
+    const APICLaunchInfo* apic_info
 );
 WP_API int wp_cuda_get_max_shared_memory(void* context);
 WP_API bool wp_cuda_configure_kernel_shared_memory(void* kernel, int size);
