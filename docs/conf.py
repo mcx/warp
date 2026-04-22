@@ -132,7 +132,7 @@ nitpick_ignore_regex = [
 
 # -- Options for source files ------------------------------------------------
 
-exclude_patterns = [".DS_Store", "Thumbs.db", "_build", "_src"]
+exclude_patterns = [".DS_Store", "Thumbs.db", "_build", "_src", "superpowers"]
 source_suffix = {
     ".rst": "restructuredtext",
     ".md": "markdown",
