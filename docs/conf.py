@@ -164,7 +164,7 @@ html_theme_options = {
             "type": "fontawesome",
         },
     ],
-    "navigation_depth": 1,
+    "navigation_depth": 2,
 }
 html_title = f"Warp {version}"
 html_context = {
