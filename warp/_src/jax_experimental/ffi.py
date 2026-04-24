@@ -15,7 +15,7 @@ import jax
 
 import warp as wp
 from warp._src.codegen import get_full_arg_spec, make_full_qualified_name
-from warp._src.context import CudaMemcpyKind, _canonicalize_dim, _normalize_launch_dim
+from warp._src.context import CudaMemcpyKind
 from warp._src.jax import get_jax_device
 from warp._src.types import (
     array_t,
@@ -274,8 +274,10 @@ class FfiKernel:
                 launch_dims = get_warp_shape(self.input_args[self.first_array_arg], args[self.first_array_arg].shape)
             else:
                 raise RuntimeError("Failed to determine launch dimensions")
+        elif isinstance(launch_dims, int):
+            launch_dims = (launch_dims,)
         else:
-            launch_dims = _canonicalize_dim(launch_dims)
+            launch_dims = tuple(launch_dims)
 
         # output shapes
         if isinstance(output_dims, dict):
@@ -418,8 +420,7 @@ class FfiKernel:
                         # roll batch size into the first launch dimension
                         launch_dims = (batch_size * launch_dims[0], *launch_dims[1:])
 
-                normalized = _normalize_launch_dim(launch_dims, self.kernel.adj.kernel_dim)
-                launch_bounds = launch_bounds_t(normalized)
+                launch_bounds = launch_bounds_t(launch_dims)
                 kernel_params[0] = ctypes.addressof(launch_bounds)
 
                 # get device and stream

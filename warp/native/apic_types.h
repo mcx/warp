@@ -236,7 +236,6 @@ struct APICLaunchInfo {
     uint8_t _pad[7];  // Align params to 8 bytes
     const APICLaunchParamRecord* params;  // Array of parameter bindings
     int32_t num_params;  // Number of parameter bindings
-    int32_t kernel_dim;  // Kernel launch dimensionality (1-4), from kernel.adj.kernel_dim
 };
 
 // =============================================================================

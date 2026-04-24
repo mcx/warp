@@ -21,10 +21,31 @@
 #include "error.h"
 #include "mesh.h"
 
+#include <cstddef>  // offsetof
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+
+// The APIC record and replay paths (in this file, apic.cu, warp.cpp, and
+// warp.cu) construct launch_bounds_t from serialized fields (shape/ndim/size)
+// and pass it as args[0] to kernel entry points. Lock the expected layout so
+// any future struct change fails at compile time rather than silently breaking
+// the generated kernel's ABI on replay.
+static_assert(sizeof(wp::launch_bounds_t) == 32, "APIC record/replay assumes 32-byte launch_bounds_t; see builtin.h");
+static_assert(
+    offsetof(wp::launch_bounds_t, shape) == 0, "APIC record/replay expects launch_bounds_t::shape at offset 0"
+);
+static_assert(
+    offsetof(wp::launch_bounds_t, ndim) == 16, "APIC record/replay expects launch_bounds_t::ndim at offset 16"
+);
+static_assert(
+    offsetof(wp::launch_bounds_t, size) == 24, "APIC record/replay expects launch_bounds_t::size at offset 24"
+);
+static_assert(
+    APIC_LAUNCH_MAX_DIMS == wp::LAUNCH_MAX_DIMS,
+    "APIC_LAUNCH_MAX_DIMS (apic_types.h) must match wp::LAUNCH_MAX_DIMS (builtin.h)"
+);
 
 // ============================================================================
 // Thread-local Recording State
@@ -858,20 +879,19 @@ static bool apic_cpu_replay_stream(
                 return false;
             }
 
-            // Build launch_bounds_t<N> with correct per-N layout
+            // Build launch_bounds_t (see builtin.h) to pass as the kernel's
+            // first argument, matching wp_cpu_launch_kernel's signature.
             int ndim = rec->ndim;
             if (ndim < 1)
                 ndim = 1;
             if (ndim > APIC_LAUNCH_MAX_DIMS)
                 ndim = APIC_LAUNCH_MAX_DIMS;
-            size_t size_offset = ((ndim * sizeof(int)) + 7) & ~size_t(7);
-            size_t bounds_size = (size_offset + sizeof(size_t) + sizeof(bool) + 7) & ~size_t(7);
 
-            uint8_t bounds_buf[64];
-            memset(bounds_buf, 0, bounds_size);
+            wp::launch_bounds_t bounds = {};
             for (int d = 0; d < ndim; d++)
-                reinterpret_cast<int*>(bounds_buf)[d] = rec->shape[d];
-            *reinterpret_cast<size_t*>(bounds_buf + size_offset) = rec->size;
+                bounds.shape[d] = rec->shape[d];
+            bounds.ndim = ndim;
+            bounds.size = rec->size;
 
             // Build args from param bindings
             const uint8_t* params_ptr = params_start;
@@ -940,7 +960,7 @@ static bool apic_cpu_replay_stream(
             // apic_info=nullptr is safe: g_apic_state is null during replay, so
             // the recording branch in wp_cpu_launch_kernel is a no-op and the
             // execute branch fires.
-            wp_cpu_launch_kernel(func, bounds_buf, args_buf, /*adj_args=*/nullptr, /*apic_info=*/nullptr);
+            wp_cpu_launch_kernel(func, &bounds, args_buf, /*adj_args=*/nullptr, /*apic_info=*/nullptr);
 
             if (args_buf != args_stack)
                 free(args_buf);

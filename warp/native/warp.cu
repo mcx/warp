@@ -4628,25 +4628,22 @@ size_t wp_cuda_launch_kernel(
     if (apic_info) {
         APICState state = wp_apic_get_recording_state();
         if (state) {
-            // Use kernel_dim from APICLaunchInfo (set by Python from kernel.adj.kernel_dim)
-            int ndim = apic_info->kernel_dim;
-            if (ndim < 1)
-                ndim = 1;
-            if (ndim > APIC_LAUNCH_MAX_DIMS)
-                ndim = APIC_LAUNCH_MAX_DIMS;
-
-            // Read multi-dimensional shape from launch_bounds_t in args[0].
-            // launch_bounds_t<N> starts with int shape[N], matching the CPU path.
+            // Read shape/ndim/size from the launch_bounds_t* in args[0] (see builtin.h).
             int shape[APIC_LAUNCH_MAX_DIMS] = {};
+            int ndim = 0;
             uint64_t launch_size = dim;
-            if (args && args[0] && ndim > 0) {
-                const int* bounds_shape = static_cast<const int*>(args[0]);
+            if (args && args[0]) {
+                const auto* lb = static_cast<const wp::launch_bounds_t*>(args[0]);
+                ndim = lb->ndim;
+                if (ndim < 1)
+                    ndim = 1;
+                if (ndim > APIC_LAUNCH_MAX_DIMS)
+                    ndim = APIC_LAUNCH_MAX_DIMS;
                 for (int d = 0; d < ndim; d++)
-                    shape[d] = bounds_shape[d];
-                launch_size = 1;
-                for (int d = 0; d < ndim; d++)
-                    launch_size *= shape[d];
+                    shape[d] = lb->shape[d];
+                launch_size = lb->size;
             } else {
+                ndim = 1;
                 shape[0] = (int)dim;
             }
 

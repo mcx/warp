@@ -272,10 +272,8 @@ static bool apic_rebuild_cuda_graph(APICGraphInternal* graph, CUstream stream)
             std::vector<void*> args;
             std::vector<uint8_t*> arg_storage;
 
-            // Build launch_bounds_t<N> as args[0].
-            // launch_bounds_t is templated on N (ndim), so the layout varies:
-            //   struct launch_bounds_t<N> { int shape[N]; size_t size; bool tiled; };
-            // size_t is 8-byte aligned, so size_offset = align_up(N * sizeof(int), 8).
+            // Build launch_bounds_t as args[0] (see builtin.h). The buffer is
+            // owned by arg_storage (uint8_t*) for delete[] after launch.
             {
                 int ndim = rec->ndim;
                 if (ndim < 1)
@@ -283,22 +281,12 @@ static bool apic_rebuild_cuda_graph(APICGraphInternal* graph, CUstream stream)
                 if (ndim > APIC_LAUNCH_MAX_DIMS)
                     ndim = APIC_LAUNCH_MAX_DIMS;
 
-                size_t size_offset = ((ndim * sizeof(int)) + 7) & ~size_t(7);
-                size_t tiled_offset = size_offset + sizeof(size_t);
-                size_t bounds_alloc_size = (tiled_offset + sizeof(bool) + 7) & ~size_t(7);
-
-                uint8_t* bounds_buf = new uint8_t[bounds_alloc_size];
-                memset(bounds_buf, 0, bounds_alloc_size);
-
-                // Write shape[0..N-1]
-                int* shape_ptr = reinterpret_cast<int*>(bounds_buf);
-                for (int d = 0; d < ndim; d++) {
-                    shape_ptr[d] = rec->shape[d];
-                }
-                // Write size at the correct offset for this N
-                size_t* size_ptr = reinterpret_cast<size_t*>(bounds_buf + size_offset);
-                *size_ptr = rec->size;
-                // tiled = false (already zeroed)
+                uint8_t* bounds_buf = new uint8_t[sizeof(wp::launch_bounds_t)]();
+                auto* bounds = reinterpret_cast<wp::launch_bounds_t*>(bounds_buf);
+                for (int d = 0; d < ndim; d++)
+                    bounds->shape[d] = rec->shape[d];
+                bounds->ndim = ndim;
+                bounds->size = rec->size;
 
                 args.push_back(bounds_buf);
                 arg_storage.push_back(bounds_buf);

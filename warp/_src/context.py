@@ -65,7 +65,7 @@ import warp._src.codegen
 import warp.config
 from warp._src.codegen import WarpCodegenTypeError, synchronized
 from warp._src.texture import Texture1D, Texture2D, Texture3D, texture1d_t, texture2d_t, texture3d_t
-from warp._src.types import Array, LaunchBounds, launch_bounds_t, type_repr
+from warp._src.types import Array, launch_bounds_t, type_repr
 
 _wp_module_name_ = "warp.context"
 
@@ -7880,7 +7880,7 @@ class Launch:
         hooks: KernelHooks | None = None,
         params: Sequence[Any] | None = None,
         params_addr: Sequence[ctypes.c_void_p] | None = None,
-        bounds: LaunchBounds | None = None,
+        bounds: launch_bounds_t | None = None,
         max_blocks: int = 0,
         block_dim: int = 256,
         adjoint: bool = False,
@@ -7894,10 +7894,9 @@ class Launch:
         if not hooks:
             hooks = self.module_exec.get_kernel_hooks(kernel)
 
-        # if not specified set a zero bound sized to match the compiled kernel
+        # if not specified set a zero bound
         if not bounds:
-            kernel_dim = kernel.adj.kernel_dim
-            bounds = launch_bounds_t((0,) * kernel_dim)
+            bounds = launch_bounds_t(0)
 
         # if not specified then build a list of default value params for args
         if not params:
@@ -7939,7 +7938,7 @@ class Launch:
         This should not be changed after the launch object is created.
         """
 
-        self.bounds: LaunchBounds = bounds
+        self.bounds: launch_bounds_t = bounds
         """The launch bounds. Update with :meth:`set_dim`."""
 
         self.max_blocks: int = max_blocks
@@ -7957,8 +7956,7 @@ class Launch:
         Args:
             dim: The dimensions of the launch.
         """
-        normalized = _normalize_launch_dim(dim, self.kernel.adj.kernel_dim)
-        self.bounds = launch_bounds_t(normalized)
+        self.bounds = launch_bounds_t(dim)
 
         # launch bounds always at index 0
         self.params[0] = self.bounds
@@ -8099,73 +8097,6 @@ class Launch:
                 )
 
 
-def _canonicalize_dim(dim: int | Sequence[int]) -> tuple[int, ...]:
-    """Convert *dim* to a canonical ``tuple[int, ...]``."""
-    if isinstance(dim, int):
-        return (dim,)
-    if isinstance(dim, tuple):
-        return dim
-    return tuple(dim)
-
-
-def _normalize_launch_dim(dim: int | Sequence[int], kernel_dim: int) -> tuple[int, ...]:
-    """Reshape *dim* to exactly *kernel_dim* dimensions for ABI compatibility.
-
-    The compiled C++ kernel expects ``launch_bounds_t<kernel_dim>``, so the
-    Python-side ctypes struct must have exactly *kernel_dim* shape elements.
-    Excess dimensions are folded into the last slot; missing dimensions are
-    padded with ones.
-    """
-    dim = _canonicalize_dim(dim)
-    ndim = len(dim)
-    if ndim == kernel_dim:
-        return dim
-    elif ndim < kernel_dim:
-        return dim + (1,) * (kernel_dim - ndim)
-    else:
-        head = dim[: kernel_dim - 1]
-        tail_product = 1
-        for d in dim[kernel_dim - 1 :]:
-            tail_product *= d
-        return (*head, tail_product)
-
-
-def _construct_tiled_bounds(dim, block_dim, kernel):
-    """Construct launch bounds for a tiled launch.
-
-    After compilation, kernel_dim tells us how many dimensions wp.tid() uses.
-    If it matches len(dim), the user's wp.tid() covers only the user-facing
-    dims and we set tiled=True so launch_coord divides out block_dim().
-    If it's len(dim)+1, the user explicitly covers the block_dim dimension
-    in their wp.tid() call, so we append block_dim to the shape.
-    """
-    dim = _canonicalize_dim(dim)
-    ndim = len(dim)
-    kernel_dim = kernel.adj.kernel_dim
-
-    if kernel.adj.max_tid_dimensionality == 0:
-        # No wp.tid() calls — flatten to 1D, only total thread count matters.
-        dim = _normalize_launch_dim(dim, 1)
-        ndim = 1
-
-    if kernel_dim == ndim:
-        # wp.tid() returns user dims only — block_dim threads share coordinates
-        bounds = launch_bounds_t(dim)
-        bounds.size *= block_dim
-        bounds.tiled = True
-    elif kernel_dim == ndim + 1:
-        # wp.tid() explicitly covers the block_dim dimension
-        bounds = launch_bounds_t((*dim, block_dim))
-    else:
-        raise RuntimeError(
-            f"Tiled launch dimension mismatch for kernel '{kernel.key}': "
-            f"wp.tid() uses {kernel_dim} dimensions but launch_tiled was given {ndim} user dimensions. "
-            f"Expected kernel_dim to be {ndim} or {ndim + 1}."
-        )
-
-    return bounds
-
-
 def launch(
     kernel,
     dim: int | Sequence[int],
@@ -8180,7 +8111,6 @@ def launch(
     record_cmd: bool = False,
     max_blocks: int = 0,
     block_dim: int = 256,
-    tiled: bool = False,
 ):
     """Launch a Warp kernel on the target device
 
@@ -8206,9 +8136,6 @@ def launch(
           Only has an effect for CUDA kernel launches.
           If negative or zero, the maximum hardware value will be used.
         block_dim: The number of threads per block (always 1 for "cpu" devices).
-        tiled: If ``True``, treat the launch as a tiled launch where
-          ``block_dim`` threads cooperate per tile.  Normally set
-          automatically by :func:`wp.launch_tiled`.
     """
 
     init()
@@ -8230,13 +8157,22 @@ def launch(
     if warp.config.print_launches:
         print(f"kernel: {kernel.key} dim: {dim} inputs: {inputs} outputs: {outputs} device: {device}")
 
-    # quick check: compute total size to skip zero-size launches early
-    dim = _canonicalize_dim(dim)
-    total_dim_size = 1
-    for d in dim:
-        total_dim_size *= d
+    # construct launch bounds
+    bounds = launch_bounds_t(dim)
 
-    if total_dim_size > 0:
+    if bounds.size > 0:
+        # first param is the number of threads
+        params = []
+        params.append(bounds)
+
+        # converts arguments to kernel's expected ctypes and packs into params
+        def pack_args(args, params, adjoint=False):
+            for i, a in enumerate(args):
+                arg_type = kernel.adj.args[i].type
+                arg_name = kernel.adj.args[i].label
+
+                params.append(pack_arg(kernel, arg_type, arg_name, a, device, adjoint))
+
         fwd_args = []
         fwd_args.extend(inputs)
         fwd_args.extend(outputs)
@@ -8271,25 +8207,6 @@ def launch(
 
         if not module_exec:
             return
-
-        # construct launch bounds after compilation so kernel_dim is available
-        if tiled:
-            bounds = _construct_tiled_bounds(dim, block_dim, kernel)
-        else:
-            normalized = _normalize_launch_dim(dim, kernel.adj.kernel_dim)
-            bounds = launch_bounds_t(normalized)
-
-        # first param is the number of threads
-        params = []
-        params.append(bounds)
-
-        # converts arguments to kernel's expected ctypes and packs into params
-        def pack_args(args, params, adjoint=False):
-            for i, a in enumerate(args):
-                arg_type = kernel.adj.args[i].type
-                arg_name = kernel.adj.args[i].label
-
-                params.append(pack_arg(kernel, arg_type, arg_name, a, device, adjoint))
 
         # late bind
         hooks = module_exec.get_kernel_hooks(kernel)
@@ -8474,7 +8391,7 @@ def launch(
         frame = inspect.currentframe().f_back
         caller = {"file": frame.f_code.co_filename, "lineno": frame.f_lineno, "func": frame.f_code.co_name}
         runtime.tape.record_launch(
-            kernel, dim, max_blocks, inputs, outputs, device, block_dim, metadata={"caller": caller}, tiled=tiled
+            kernel, dim, max_blocks, inputs, outputs, device, block_dim, metadata={"caller": caller}
         )
 
         # detect illegal inter-kernel read/write access patterns if verification flag is set
@@ -8530,15 +8447,15 @@ def launch_tiled(*args, **kwargs):
     if device.is_cpu:
         kwargs["block_dim"] = 1
 
-    dim = _canonicalize_dim(kwargs["dim"])
+    dim = kwargs["dim"]
+    if not isinstance(dim, list):
+        dim = list(dim) if isinstance(dim, tuple) else [dim]
 
     if len(dim) > 3:
         raise RuntimeError("wp.launch_tiled() requires a grid with fewer than 4 dimensions")
 
-    # Signal to launch() that this is a tiled launch.  Bounds construction
-    # is deferred until after module compilation so we can inspect kernel_dim
-    # to decide whether wp.tid() already covers the block_dim dimension.
-    kwargs["tiled"] = True
+    # add trailing dimension
+    kwargs["dim"] = [*dim, kwargs["block_dim"]]
 
     # forward to original launch method
     return launch(*args, **kwargs)
