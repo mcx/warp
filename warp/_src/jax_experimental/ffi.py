@@ -1155,12 +1155,16 @@ def jax_kernel(
             This must include the number of ``in_out_arguments``.
         vmap_method: String specifying how the callback transforms under ``vmap()``.
             This argument can also be specified for individual calls.
-        launch_dims: Specify the default kernel launch dimensions. If None, launch
-            dimensions are inferred from the shape of the first array argument.
-            This argument can also be specified for individual calls.
+        launch_dims: Specify the kernel launch dimensions. If None, launch dimensions
+            are inferred from the shape of the first array argument. When
+            ``enable_backward=False``, this value will be used by default but
+            can be overridden for individual calls. When ``enable_backward=True``,
+            this value is fixed at construction time and cannot be overridden
+            per call.
         output_dims: Specify the default dimensions of output arrays.  If None, output
             dimensions are inferred from the launch dimensions.
             This argument can also be specified for individual calls.
+            Not supported when ``enable_backward=True``.
         in_out_argnames: Names of arguments that are both inputs and outputs (aliased buffers).
             These must be array arguments that appear before any pure output arguments in the
             kernel signature. The number of in-out arguments is included in ``num_outputs``.
@@ -1176,6 +1180,7 @@ def jax_kernel(
         - Input and input-output arguments must precede the output arguments in the ``kernel`` definition.
         - There must be at least one output or input-output argument.
         - Only the CUDA backend is supported.
+        - ``output_dims`` and ``in_out_argnames`` are not supported when ``enable_backward=True``.
     """
 
     check_jax_version()

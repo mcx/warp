@@ -540,8 +540,8 @@ The autodiff functionality is considered experimental and is still a work in pro
 - Scalar inputs must be static arguments in JAX.
 - Gradients are returned for differentiable array inputs (static scalars are excluded from the gradient tuple).
 - Input-output arguments (``in_out_argnames``) are not supported when ``enable_backward=True``, because in-place modifications are not differentiable.
-- ``output_dims`` is not currently supported when ``enable_backward=True`` (this requires separate output-buffer allocation logic; it is planned as a follow-up).
-- ``launch_dims`` **is** supported when ``enable_backward=True``. The captured value is used by both the forward and the adjoint launches. This is required for correct gradient values when the input array has more dimensions than the kernel's ``wp.tid()`` iteration space (for example, an LBM distribution ``(Q, nx, ny, nz)`` with a 3-D spatial ``tid`` or a batched volume ``(B, x, y, z)``). If ``launch_dims`` is omitted, the dimensions are inferred from the shape of the first array argument as before.
+- ``output_dims`` is not currently supported when ``enable_backward=True``.
+- ``launch_dims`` **is** supported when ``enable_backward=True``. The captured value is used by both the forward and the adjoint launches. This is required for correct gradient values when the input array has more dimensions than the kernel's ``wp.tid()`` iteration space (for example, an LBM distribution ``(Q, nx, ny, nz)`` with a 3-D spatial ``tid`` or a batched volume ``(B, x, y, z)``). If ``launch_dims`` is omitted, the dimensions are inferred from the shape of the first array argument as before. Note that when ``enable_backward=True``, ``launch_dims`` is fixed at construction time and **cannot** be overridden per-call (unlike with ``enable_backward=False``, where the caller may pass a different ``launch_dims`` to each call).
 
 Computing gradients with custom launch dimensions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -564,8 +564,8 @@ forward launch and the adjoint launch, so gradients computed via
 
     @wp.kernel
     def scale(
-        a: wp.array4d(dtype=wp.float32),
-        b: wp.array4d(dtype=wp.float32),
+        a: wp.array4d[float],
+        b: wp.array4d[float],
     ):
         # tid is 3-D; the outer axis is iterated inside the kernel.
         i, j, k = wp.tid()
