@@ -41,6 +41,9 @@ _FFI_REGISTRY_LOCK = threading.Lock()
 # Lock when XLA invokes callbacks from multiple threads.
 _FFI_CALLBACK_LOCK = threading.Lock()
 
+# Sentinel for detecting when per-call kwargs are passed to differentiable wrappers.
+_MISSING = object()
+
 
 def check_jax_version():
     # check if JAX version supports this
@@ -1468,29 +1471,43 @@ def jax_kernel(
 
     if static_args:
         static_names = [parameters[i].name for i in static_args]
+    else:
+        static_names = []
 
-        def _user_callable(*args):
-            return jax_func(*args)
+    key = (*key, tuple(sorted(static_names)))
 
-        _user_callable.__signature__ = signature
+    def _user_callable(*args):
+        return jax_func(*args)
 
-        # Cache differentiable wrapper
-        key = (*key, tuple(sorted(static_names)))
-        with _FFI_REGISTRY_LOCK:
-            cached = _FFI_DIFF_KERNEL_REGISTRY.get(key)
-            if cached is None:
-                cached = jax.jit(_user_callable, static_argnames=tuple(static_names))
-                _FFI_DIFF_KERNEL_REGISTRY[key] = cached
-        return _FFI_DIFF_KERNEL_REGISTRY[key]
+    _user_callable.__signature__ = signature
 
-    # Cache differentiable wrapper (no static args)
-    key = (*key, ())
+    # Cache differentiable wrapper
     with _FFI_REGISTRY_LOCK:
         cached = _FFI_DIFF_KERNEL_REGISTRY.get(key)
         if cached is None:
-            _FFI_DIFF_KERNEL_REGISTRY[key] = jax_func
-            cached = jax_func
-    return cached
+            cached = jax.jit(_user_callable, static_argnames=tuple(static_names))
+            _FFI_DIFF_KERNEL_REGISTRY[key] = cached
+
+    # Thin Python-level wrapper that intercepts FfiKernel-style per-call kwargs
+    # and raises informative errors before JAX tracing begins.
+    def _checked_wrapper(*args, launch_dims=_MISSING, output_dims=_MISSING, vmap_method=_MISSING):
+        if launch_dims is not _MISSING:
+            raise TypeError(
+                "jax_kernel(): launch_dims cannot be overridden per-call when enable_backward=True "
+                f"(this wrapper was created with launch_dims={_user_launch_dims!r}). "
+                "Call jax_kernel() again with a different launch_dims to create a new wrapper."
+            )
+        if output_dims is not _MISSING:
+            raise TypeError("jax_kernel(): output_dims is not supported when enable_backward=True.")
+        if vmap_method is not _MISSING:
+            raise TypeError(
+                "jax_kernel(): vmap_method cannot be overridden per-call when enable_backward=True; "
+                "it is fixed at construction time. "
+                "Call jax_kernel() again with a different vmap_method to create a new wrapper."
+            )
+        return cached(*args)
+
+    return _checked_wrapper
 
 
 def jax_callable(

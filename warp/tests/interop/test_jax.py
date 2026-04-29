@@ -1645,6 +1645,32 @@ def test_ffi_jax_kernel_launch_dims_autodiff_separate_cache(test, device):
 
 
 @unittest.skipUnless(_jax_version() >= (0, 5, 0), "Jax version too old")
+def test_ffi_jax_kernel_autodiff_per_call_override_rejected(test, device):
+    """Passing FfiKernel-style per-call kwargs to a differentiable wrapper raises TypeError."""
+    import jax.numpy as jnp
+
+    from warp.jax_experimental.ffi import jax_kernel
+
+    @wp.kernel
+    def noop(a: wp.array1d(dtype=wp.float32), b: wp.array1d(dtype=wp.float32)):
+        i = wp.tid()
+        b[i] = a[i]
+
+    N = 8
+    jax_func = jax_kernel(noop, num_outputs=1, launch_dims=(N,), enable_backward=True)
+    a = jnp.ones((N,), dtype=jnp.float32)
+
+    with test.assertRaisesRegex(TypeError, "launch_dims cannot be overridden per-call"):
+        jax_func(a, launch_dims=(N,))
+
+    with test.assertRaisesRegex(TypeError, "output_dims is not supported"):
+        jax_func(a, output_dims={"b": (N,)})
+
+    with test.assertRaisesRegex(TypeError, "vmap_method cannot be overridden per-call"):
+        jax_func(a, vmap_method="sequential")
+
+
+@unittest.skipUnless(_jax_version() >= (0, 5, 0), "Jax version too old")
 def test_ffi_jax_kernel_output_dims_autodiff_still_blocked(test, device):
     """output_dims with enable_backward=True remains a follow-up (still blocked)."""
     from warp.jax_experimental.ffi import jax_kernel
@@ -2311,6 +2337,12 @@ try:
             TestJax,
             "test_ffi_jax_kernel_launch_dims_autodiff_separate_cache",
             test_ffi_jax_kernel_launch_dims_autodiff_separate_cache,
+            devices=jax_compatible_cuda_devices,
+        )
+        add_function_test(
+            TestJax,
+            "test_ffi_jax_kernel_autodiff_per_call_override_rejected",
+            test_ffi_jax_kernel_autodiff_per_call_override_rejected,
             devices=jax_compatible_cuda_devices,
         )
         add_function_test(
