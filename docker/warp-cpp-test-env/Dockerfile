@@ -111,10 +111,14 @@ RUN nvcc --version && uv --version && cmake --version
 # Build dependencies for OpenGL/GLFW C++ examples
 # (02_apic_visualization, 03_apic_visualization_cpu). GLFW is fetched and built
 # from source via CMake FetchContent and needs X11 + GL development headers.
+# python3-jinja2 is required by glad v2's CMake-time loader generator, which
+# CMake invokes via system /usr/bin/python3 (uv-managed envs aren't visible
+# to find_package(Python)).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1-mesa-dev \
         xorg-dev \
         libxkbcommon-dev \
+        python3-jinja2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
