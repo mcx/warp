@@ -689,9 +689,11 @@ def build_dll_for_arch(args, dll_path, cpp_paths, cu_paths, arch, libs: list[str
                 elapsed = (time.perf_counter_ns() - wall_clock) / 1000000.0
                 print(f"build took {elapsed:.2f} ms ({args.jobs:d} workers)")
 
-        # Python stable ABI library for fastcall.cpp
+        # Python stable ABI library for fastcall.cpp. /DELAYLOAD defers loading
+        # python3.dll until a Python C API function is actually called -- without
+        # it, warp.dll cannot be LoadLibrary'd from non-Python C++ hosts.
         python_libs_dir = os.path.join(sys.base_prefix, "libs")
-        linkopts.append(f'python3.lib /LIBPATH:"{python_libs_dir}"')
+        linkopts.append(f'python3.lib /LIBPATH:"{python_libs_dir}" /DELAYLOAD:python3.dll delayimp.lib')
 
         with ScopedTimer("link", active=args.verbose):
             link_cmd = f'"{host_linker}" {" ".join(linkopts + libs)} /out:"{dll_path}"'
@@ -804,9 +806,9 @@ def build_dll_for_arch(args, dll_path, cpp_paths, cu_paths, arch, libs: list[str
                 elapsed = (time.perf_counter_ns() - wall_clock) / 1000000.0
                 print(f"build took {elapsed:.2f} ms ({args.jobs:d} workers)")
 
-        # Python C API symbols from fastcall.cpp are left unresolved at link time and
-        # resolved at runtime by the interpreter. A post-link nm -u check (below) verifies
-        # that only Python symbols are unresolved.
+        # Python C API function symbols from fastcall.cpp are left unresolved at link
+        # time and resolved lazily on first call by the interpreter. A post-link nm/readelf
+        # check (below) verifies no eagerly-resolved data symbols remain.
         if sys.platform == "darwin":
             # macOS linker rejects undefined symbols by default; this is the standard
             # convention for Python extensions (used by CPython, pybind11).
@@ -814,7 +816,9 @@ def build_dll_for_arch(args, dll_path, cpp_paths, cu_paths, arch, libs: list[str
             opt_exclude_libs = ""
             opt_static_runtime = ""
         else:
-            opt_undefined = ""
+            # -z lazy: pin lazy PLT binding so dlopen(..., RTLD_LAZY) works for non-Python
+            # C++ hosts even on distros that flip the default to -z now via RELRO.
+            opt_undefined = "-Wl,-z,lazy"
             opt_exclude_libs = "-Wl,--exclude-libs,ALL"
             opt_static_runtime = f"-static-libstdc++ -static-libgcc -Wl,--version-script={native_dir}/warp.map"
 
@@ -855,6 +859,28 @@ def build_dll_for_arch(args, dll_path, cpp_paths, cu_paths, arch, libs: list[str
             unexpected = [sym for sym in undefined if not sym.startswith(("Py", "_Py"))]
             if unexpected:
                 raise RuntimeError("Unexpected undefined symbols in " + dll_path + ":\n" + "\n".join(unexpected))
+
+            # Forbid eagerly-resolved Python data symbol references. Function imports
+            # go through PLT/GOT (R_*_JUMP_SLOT) and are lazily bound; data imports use
+            # R_*_GLOB_DAT and are resolved at load time, which would break dlopen()
+            # from non-Python C++ hosts.
+            if sys.platform != "darwin":
+                relocs_output = subprocess.check_output(["readelf", "-r", "--wide", dll_path])
+                eager_py_data = []
+                for line in relocs_output.decode().splitlines():
+                    fields = line.split()
+                    if len(fields) < 5 or "GLOB_DAT" not in fields[2]:
+                        continue
+                    sym_name = fields[4]
+                    if sym_name.startswith(("Py", "_Py")):
+                        eager_py_data.append(sym_name)
+                if eager_py_data:
+                    raise RuntimeError(
+                        "Eagerly-resolved Python data symbols in "
+                        + dll_path
+                        + " (would break loading from non-Python hosts):\n"
+                        + "\n".join(eager_py_data)
+                    )
 
             # Strip symbols to reduce the binary size
             if mode == "release":

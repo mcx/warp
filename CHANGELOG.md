@@ -157,6 +157,9 @@
   Clang/LLVM toolchain (`llvm_cuda=True`) to fail when no system CUDA toolkit was available.
 - Fix a rare data corruption in peer-to-peer `wp.copy()` with non-contiguous sources
   ([GH-1384](https://github.com/NVIDIA/warp/issues/1384)).
+- Fix unresolved Python C API symbols in `warp.so`/`warp.dll`/`libwarp.dylib`, allowing the library
+  to be loaded from non-Python C++ applications via `dlopen(..., RTLD_LAZY)` / `LoadLibrary()`
+  ([GH-1399](https://github.com/NVIDIA/warp/issues/1399)).
 
 ### Documentation
 
