@@ -226,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Build Warp native libraries with optional CUDA, LLVM, and MathDx support",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
     )
 
     # General options
@@ -235,6 +236,14 @@ def main(argv: list[str] | None = None) -> int:
         choices=["release", "debug"],
         default="release",
         help="Build configuration mode",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_const",
+        const="debug",
+        dest="mode",
+        default=argparse.SUPPRESS,
+        help="Shortcut for --mode debug",
     )
     try:
         available_cpus = len(os.sched_getaffinity(0))
